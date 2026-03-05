@@ -896,7 +896,7 @@ def render_dictionary():
 
     with left:
         st.markdown("<div class='cw-card'>", unsafe_allow_html=True)
-        st.markdown("### Quick Start (Executives)")
+        st.markdown("### Quick Start")
         st.write("1) Start on **Overview** to see where DTI is today.")
         st.write("2) Go to **Forecast** to see baseline next-quarter direction.")
         st.write("3) Use **Scenario Planner** to test decisions: *If X, then Y*.")
