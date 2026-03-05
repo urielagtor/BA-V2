@@ -29,11 +29,14 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 # ----------------------------
 # Page config
 # ----------------------------
-st.set_page_config(
-    page_title="CoreWeave | Debt-to-Income Strategy Dashboard",
-    page_icon="⚡",
-    layout="wide"
-)
+col1, col2 = st.columns([1,5])
+
+with col1:
+    st.image("CoreWeave Logo White.svg", width=120)
+
+with col2:
+    st.title("CoreWeave Debt-to-Income Strategy Dashboard")
+    st.caption("Improving financial leverage using predictive and prescriptive analytics")
 
 # ----------------------------
 # Branding (CoreWeave-ish)
