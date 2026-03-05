@@ -1,5 +1,7 @@
 # streamlit_app.py
 # CoreWeave executive dashboard with SIDEBAR navigation + 25/75 two-column layouts
+# + NEW "Dictionary" page (definitions + how to use)
+#
 # - Sidebar contains page navigation (traditional app menu)
 # - No data upload: loads repo file data/CoreWeave_BalanceSheet_SEC_Filings_simulated.xlsx
 # - Logo: CoreWeave Logo White.svg (repo root)
@@ -373,8 +375,8 @@ with st.sidebar:
     st.markdown("### Navigation")
     page = st.radio(
         "Go to",
-        ["Overview", "Forecast", "Scenario Planner", "Recommendations & Risks"],
-        label_visibility="collapsed"
+        ["Overview", "Forecast", "Scenario Planner", "Recommendations & Risks", "Dictionary"],
+        label_visibility="collapsed",
     )
 
     st.markdown("<div class='cw-divider'></div>", unsafe_allow_html=True)
@@ -383,12 +385,12 @@ with st.sidebar:
     ratio_threshold = st.slider(
         "DTI alert threshold",
         0.5, 3.0, 1.2, 0.1,
-        help="If DTI exceeds this threshold, the dashboard flags it as requiring mitigation."
+        help="If DTI exceeds this threshold, the dashboard flags it as requiring mitigation.",
     )
     backtest_min_train = st.slider(
         "Backtest min training quarters",
         4, 12, 6, 1,
-        help="Higher values can stabilize backtests but reduce the number of backtest points."
+        help="Higher values can stabilize backtests but reduce the number of backtest points.",
     )
 
     st.markdown("<div class='cw-divider'></div>", unsafe_allow_html=True)
@@ -481,36 +483,27 @@ def render_overview():
 def render_forecast():
     st.subheader("Forecast")
 
-    # 25/75 layout: left KPIs, right visuals
     left, right = st.columns([1, 3], vertical_alignment="top")
 
     with left:
         st.markdown("<div class='cw-card'>", unsafe_allow_html=True)
-        st.markdown("### What this means")
-        st.write("Directional forecast of **Revenue** and **Liabilities** for next quarter.")
-        st.write("Use it to set expectations, then validate actions in **Scenario Planner**.")
+        st.markdown("### How to read this page")
+        st.write("• Forecasts are **directional** and meant for planning.")
+        st.write("• Use **Scenario Planner** to test actions (If X, then Y).")
         st.markdown("---")
 
         st.markdown("### Baseline next quarter")
         st.metric("Forecast Revenue", money(base_rev))
         st.metric("Forecast Liabilities", money(base_liab))
         st.metric("Forecast DTI", f"{base_ratio:,.2f}" if not np.isnan(base_ratio) else "—")
-
         st.markdown("---")
+
         bt_liab = time_series_backtest(df_q, "Total_Liabilities_USD", min_train=backtest_min_train)
         bt_rev = time_series_backtest(df_q, "Revenue_USD", min_train=backtest_min_train)
 
         st.markdown("### Reliability (backtest)")
-        if bt_rev:
-            st.metric("Revenue MAPE", pct(bt_rev["mape"]))
-        else:
-            st.write("Revenue MAPE: —")
-
-        if bt_liab:
-            st.metric("Liabilities MAPE", pct(bt_liab["mape"]))
-        else:
-            st.write("Liabilities MAPE: —")
-
+        st.metric("Revenue MAPE", pct(bt_rev["mape"]) if bt_rev else "—")
+        st.metric("Liabilities MAPE", pct(bt_liab["mape"]) if bt_liab else "—")
         st.caption("MAPE = average percent error. Lower is better.")
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -542,14 +535,12 @@ def render_scenario_planner():
         st.warning("Baseline forecasts are unavailable (not enough clean data).")
         return
 
-    # 25/75 layout: left controls/KPIs, right visuals
     left, right = st.columns([1, 3], vertical_alignment="top")
 
     with left:
         st.markdown("<div class='cw-card'>", unsafe_allow_html=True)
         st.markdown("### Scenario inputs")
 
-        # Presets (exec-friendly)
         p1, p2, p3 = st.columns(3)
         if p1.button("Conservative", use_container_width=True):
             st.session_state.rev_growth = 8.0
@@ -600,13 +591,11 @@ def render_scenario_planner():
             """
         )
 
-        # Dollars impact row
         d1, d2, d3 = st.columns(3)
         d1.metric("Scenario Revenue", money(proj_rev), money(proj_rev - base_rev))
         d2.metric("Scenario Liabilities", money(proj_liab), money(proj_liab - base_liab))
         d3.metric("Scenario DTI", f"{proj_ratio:,.2f}" if not np.isnan(proj_ratio) else "—", f"{delta:+.2f}" if not np.isnan(delta) else None)
 
-        # Gauge + simple comparison bar
         gcol, bcol = st.columns([1, 1])
 
         with gcol:
@@ -628,10 +617,7 @@ def render_scenario_planner():
             st.plotly_chart(gauge, use_container_width=True)
 
         with bcol:
-            compare = pd.DataFrame({
-                "Type": ["Baseline", "Scenario"],
-                "Debt-to-Income": [base_ratio, proj_ratio],
-            })
+            compare = pd.DataFrame({"Type": ["Baseline", "Scenario"], "Debt-to-Income": [base_ratio, proj_ratio]})
             fig = px.bar(compare, x="Type", y="Debt-to-Income", title="Baseline vs Scenario DTI")
             fig.update_layout(template="plotly_dark", height=320)
             fig.add_hline(y=ratio_threshold, line_dash="dash", annotation_text="Threshold")
@@ -677,7 +663,6 @@ def render_recommendations():
         st.write(f"• **Healthy:** DTI < {ratio_threshold*0.9:.2f}")
         st.write(f"• **Watch:** {ratio_threshold*0.9:.2f} ≤ DTI < {ratio_threshold:.2f}")
         st.write(f"• **Needs action:** DTI ≥ {ratio_threshold:.2f}")
-
         st.markdown("</div>", unsafe_allow_html=True)
 
     with right:
@@ -700,6 +685,88 @@ def render_recommendations():
         st.write("• Scenario planner uses transparent business rules; use as decision support, not guarantees.")
 
 
+def render_dictionary():
+    st.subheader("Dictionary (What everything means + how to use this dashboard)")
+
+    left, right = st.columns([1, 3], vertical_alignment="top")
+
+    with left:
+        st.markdown("<div class='cw-card'>", unsafe_allow_html=True)
+        st.markdown("### Quick Start (Executives)")
+        st.write("1) Start on **Overview** to see where DTI is today.")
+        st.write("2) Go to **Forecast** to see baseline next-quarter direction.")
+        st.write("3) Use **Scenario Planner** to test decisions: *If X, then Y*.")
+        st.write("4) Review **Recommendations & Risks** for actions + triggers.")
+        st.markdown("---")
+        st.markdown("### KPI at a glance")
+        st.write("**Debt-to-Income (DTI)** = **Total Liabilities ÷ Revenue**")
+        st.write("• Lower is better (less liability per $1 of revenue).")
+        st.write("• If DTI rises, liabilities are growing faster than revenue.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with right:
+        st.markdown("## Key terms & metrics")
+
+        with st.expander("Core KPI: Debt-to-Income (DTI)", expanded=True):
+            st.write("**Definition:** Total Liabilities ÷ Revenue (quarterly).")
+            st.write("**Interpretation:**")
+            st.write("• DTI = 1.5 means $1.50 of liabilities for every $1.00 of quarterly revenue.")
+            st.write("• Improving DTI requires increasing revenue, reducing liabilities, or both.")
+            st.write("**Used in:** Executive Summary, Overview trend chart, Scenario Planner.")
+
+        with st.expander("Revenue (Revenue_USD)", expanded=False):
+            st.write("Top-line quarterly revenue. Increasing revenue improves DTI (it’s the denominator).")
+
+        with st.expander("Total Liabilities (Total_Liabilities_USD)", expanded=False):
+            st.write("All liabilities on the balance sheet. Reducing liabilities improves DTI (it’s the numerator).")
+
+        with st.expander("Operating Income (Operating_Income_USD)", expanded=False):
+            st.write("Operating profit. Not directly in DTI, but a key signal of operating health and ability to pay down liabilities.")
+
+        with st.expander("Operating Expenses (Total_Operating_Expenses_USD)", expanded=False):
+            st.write("Total operating costs. In Scenario Planner, OpEx is a **conceptual lever**: cutting OpEx can reduce pressure on liabilities.")
+
+        with st.expander("Forecasting model (Ridge regression)", expanded=False):
+            st.write("A simple, explainable model that captures trend + seasonality.")
+            st.write("**Why:** Small quarterly dataset + correlated financial variables.")
+            st.write("**Output:** Baseline next-quarter Revenue and Liabilities (used for baseline DTI).")
+
+        with st.expander("Backtest metrics (MAE, RMSE, MAPE)", expanded=False):
+            st.write("These describe forecasting error using walk-forward testing.")
+            st.write("• **MAE:** average absolute error (in dollars).")
+            st.write("• **RMSE:** like MAE but penalizes large misses more (in dollars).")
+            st.write("• **MAPE:** average percent error (easy to interpret). Lower is better.")
+            st.write("Use them as a **confidence indicator**, not a guarantee.")
+
+        st.markdown("## How to use Scenario Planner (If X, then Y)")
+        st.markdown(
+            """
+            **Scenario Planner inputs:**
+            - **Revenue growth (%)**: your revenue improvement assumption next quarter.
+            - **OpEx change (%)**: conceptual efficiency lever (cuts reduce liability pressure slightly).
+            - **Liabilities improvement (%)**: paydown/refinancing effect next quarter.
+
+            **Scenario Planner outputs:**
+            - **Scenario DTI**: projected next-quarter DTI given your assumptions.
+            - **Change vs baseline**: improvement or worsening compared with baseline.
+            - **Baseline vs Scenario visuals**: gauge + bar chart.
+
+            **Practical executive use:**
+            - Try a few combinations until Scenario DTI is below the threshold.
+            - Use the recommended actions to decide which levers are most realistic.
+            """
+        )
+
+        st.markdown("## Limitations (important)")
+        st.markdown(
+            """
+            - The dataset is simulated SEC-style data; real results may vary.
+            - Forecast assumes stable patterns; major financing/market changes can break patterns.
+            - Scenario Planner uses transparent business rules and should be treated as decision support.
+            """
+        )
+
+
 # ----------------------------
 # Route
 # ----------------------------
@@ -709,5 +776,7 @@ elif page == "Forecast":
     render_forecast()
 elif page == "Scenario Planner":
     render_scenario_planner()
-else:
+elif page == "Recommendations & Risks":
     render_recommendations()
+else:
+    render_dictionary()
