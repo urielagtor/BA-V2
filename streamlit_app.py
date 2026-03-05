@@ -101,7 +101,20 @@ st.markdown(
 # ----------------------------
 # Defaults / constants
 # ----------------------------
-DEFAULT_XLSX_PATH = "/mnt/data/Copy of CoreWeave_BalanceSheet_SEC_Filings (with simulated data).xlsx"
+DEFAULT_XLSX_PATH = "data/CoreWeave_BalanceSheet_SEC_Filings_simulated.xlsx"
+
+import os
+
+DEFAULT_XLSX_PATH = "data/CoreWeave_BalanceSheet_SEC_Filings_simulated.xlsx"
+
+# Later, inside load_data():
+@st.cache_data
+def load_data(uploaded_file):
+    if uploaded_file is not None:
+        return pd.read_excel(uploaded_file)
+    if os.path.exists(DEFAULT_XLSX_PATH):
+        return pd.read_excel(DEFAULT_XLSX_PATH)
+    return pd.DataFrame()
 
 METRICS = [
     "Revenue_USD",
