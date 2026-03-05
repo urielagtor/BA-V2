@@ -29,14 +29,17 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error
+from PIL import Image
+
 
 
 # ----------------------------
 # Page config
 # ----------------------------
+favicon = Image.open("favicon.png")
 st.set_page_config(
     page_title="CoreWeave | Debt-to-Income Strategy Dashboard",
-    page_icon="⚡",
+    page_icon=favicon,
     layout="wide",
 )
 
