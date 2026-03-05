@@ -1,11 +1,12 @@
 # streamlit_app.py
 # CoreWeave executive dashboard with SIDEBAR navigation + 25/75 two-column layouts
-# + NEW "Dictionary" page (definitions + how to use)
+# + "Dictionary" page
+# + NEW "3D Viewer" page (FBX models in ./models)
 #
-# - Sidebar contains page navigation (traditional app menu)
-# - No data upload: loads repo file data/CoreWeave_BalanceSheet_SEC_Filings_simulated.xlsx
-# - Logo: CoreWeave Logo White.svg (repo root)
-# - Forecast + Scenario Planner use 25% KPI/control column + 75% visuals column
+# Notes for repo:
+# - data file:   data/CoreWeave_BalanceSheet_SEC_Filings_simulated.xlsx
+# - logo file:   CoreWeave Logo White.svg
+# - 3D models:   models/*.fbx
 #
 # Run:
 #   pip install streamlit pandas openpyxl scikit-learn plotly numpy
@@ -14,6 +15,9 @@
 import re
 import math
 import os
+import base64
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -103,6 +107,7 @@ st.markdown(
 # ----------------------------
 DATA_PATH = "data/CoreWeave_BalanceSheet_SEC_Filings_simulated.xlsx"
 LOGO_PATH = "CoreWeave Logo White.svg"
+MODELS_DIR = Path(__file__).parent / "models"
 
 # ----------------------------
 # Columns / model config
@@ -375,7 +380,7 @@ with st.sidebar:
     st.markdown("### Navigation")
     page = st.radio(
         "Go to",
-        ["Overview", "Forecast", "Scenario Planner", "Recommendations & Risks", "Dictionary"],
+        ["Overview", "Forecast", "Scenario Planner", "3D Viewer", "Recommendations & Risks", "Dictionary"],
         label_visibility="collapsed",
     )
 
@@ -453,12 +458,12 @@ def render_overview():
             if current_ratio >= ratio_threshold:
                 st.markdown(
                     f"<span class='cw-danger'>Needs action:</span> DTI {current_ratio:.2f} is above threshold {ratio_threshold:.2f}.",
-                    unsafe_allow_html=True
+                    unsafe_allow_html=True,
                 )
             elif current_ratio >= ratio_threshold * 0.9:
                 st.markdown(
                     f"<span class='cw-warn'>Watch:</span> DTI {current_ratio:.2f} is near threshold {ratio_threshold:.2f}.",
-                    unsafe_allow_html=True
+                    unsafe_allow_html=True,
                 )
             else:
                 st.markdown(f"DTI {current_ratio:.2f} is below threshold {ratio_threshold:.2f}.")
@@ -466,9 +471,13 @@ def render_overview():
         with st.expander("View underlying quarterly data", expanded=False):
             preview_cols = [c for c in [
                 "Period", "Date", "Revenue_USD", "Total_Liabilities_USD", "Debt_to_Income",
-                "Technology_Infra_USD", "Total_Operating_Expenses_USD", "Operating_Income_USD"
+                "Technology_Infra_USD", "Total_Operating_Expenses_USD", "Operating_Income_USD",
             ] if c in df_q.columns]
-            st.dataframe(df_q[preview_cols].sort_values("Date", ascending=False), use_container_width=True, height=340)
+            st.dataframe(
+                df_q[preview_cols].sort_values("Date", ascending=False),
+                use_container_width=True,
+                height=340,
+            )
         st.markdown("</div>", unsafe_allow_html=True)
 
     csv = df_q.to_csv(index=False).encode("utf-8")
@@ -487,24 +496,24 @@ def render_forecast():
 
     with left:
         st.markdown("<div class='cw-card'>", unsafe_allow_html=True)
-        st.markdown("### How to read this page")
-        st.write("• Forecasts are **directional** and meant for planning.")
-        st.write("• Use **Scenario Planner** to test actions (If X, then Y).")
+        st.markdown("### How to use")
+        st.write("Directional baseline forecast for next quarter.")
+        st.write("Use Scenario Planner to test interventions.")
         st.markdown("---")
 
         st.markdown("### Baseline next quarter")
         st.metric("Forecast Revenue", money(base_rev))
         st.metric("Forecast Liabilities", money(base_liab))
         st.metric("Forecast DTI", f"{base_ratio:,.2f}" if not np.isnan(base_ratio) else "—")
-        st.markdown("---")
 
+        st.markdown("---")
         bt_liab = time_series_backtest(df_q, "Total_Liabilities_USD", min_train=backtest_min_train)
         bt_rev = time_series_backtest(df_q, "Revenue_USD", min_train=backtest_min_train)
 
-        st.markdown("### Reliability (backtest)")
+        st.markdown("### Reliability")
         st.metric("Revenue MAPE", pct(bt_rev["mape"]) if bt_rev else "—")
         st.metric("Liabilities MAPE", pct(bt_liab["mape"]) if bt_liab else "—")
-        st.caption("MAPE = average percent error. Lower is better.")
+        st.caption("MAPE = average percent error.")
         st.markdown("</div>", unsafe_allow_html=True)
 
     with right:
@@ -624,6 +633,201 @@ def render_scenario_planner():
             st.plotly_chart(fig, use_container_width=True)
 
 
+def render_3d_viewer():
+    st.subheader("Data Center 3D Viewer")
+
+    _fbx_files = {p.stem: p for p in sorted(MODELS_DIR.glob("*.fbx"))} if MODELS_DIR.exists() else {}
+
+    if _fbx_files:
+        selected_model = st.selectbox("Select Data Center", options=list(_fbx_files.keys()))
+        fbx_b64 = base64.b64encode(_fbx_files[selected_model].read_bytes()).decode()
+
+        threejs_html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <style>
+          body { margin: 0; overflow: hidden; background: #000; }
+          canvas { display: block; width: 100%%; height: 100%%; }
+          #loading {
+            position: absolute; top: 50%%; left: 50%%;
+            transform: translate(-50%%, -50%%);
+            color: rgba(249,250,252,0.6); font-family: sans-serif;
+            font-size: 14px;
+          }
+          #controls-hint {
+            position: absolute; bottom: 12px; left: 50%%;
+            transform: translateX(-50%%);
+            color: rgba(249,250,252,0.45); font-family: sans-serif;
+            font-size: 12px; pointer-events: none; user-select: none;
+          }
+          #error-msg {
+            position: absolute; top: 50%%; left: 50%%;
+            transform: translate(-50%%, -50%%);
+            color: #FB7185; font-family: sans-serif;
+            font-size: 14px; display: none; text-align: center;
+          }
+        </style>
+        </head>
+        <body>
+        <div id="loading">Loading 3D model...</div>
+        <div id="error-msg"></div>
+        <div id="controls-hint">Drag to rotate &middot; Scroll to zoom &middot; Right-drag to pan</div>
+        <script>
+          var _scripts = [
+            "https://unpkg.com/three@0.99.0/build/three.min.js",
+            "https://unpkg.com/three@0.99.0/examples/js/libs/inflate.min.js",
+            "https://unpkg.com/three@0.99.0/examples/js/controls/OrbitControls.js",
+            "https://unpkg.com/three@0.99.0/examples/js/loaders/FBXLoader.js"
+          ];
+          var _loaded = 0;
+          function _loadNext() {
+            if (_loaded >= _scripts.length) { _init(); return; }
+            var s = document.createElement('script');
+            s.src = _scripts[_loaded];
+            s.onload = function() { _loaded++; _loadNext(); };
+            s.onerror = function() {
+              document.getElementById('loading').style.display = 'none';
+              var el = document.getElementById('error-msg');
+              el.style.display = 'block';
+              el.textContent = 'Failed to load: ' + _scripts[_loaded];
+            };
+            document.head.appendChild(s);
+          }
+          _loadNext();
+
+          function _init() {
+            try {
+              var w = document.body.clientWidth;
+              var h = document.body.clientHeight || 580;
+
+              var scene = new THREE.Scene();
+              scene.background = new THREE.Color(0x000000);
+
+              var camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 10000);
+              camera.position.set(0, 150, 300);
+
+              var renderer = new THREE.WebGLRenderer({ antialias: true });
+              renderer.setSize(w, h);
+              renderer.setPixelRatio(window.devicePixelRatio);
+              renderer.gammaOutput = true;
+              renderer.gammaFactor = 2.2;
+              document.body.appendChild(renderer.domElement);
+
+              scene.add(new THREE.AmbientLight(0xffffff, 1.5));
+              scene.add(new THREE.HemisphereLight(0xffffff, 0x666666, 1.0));
+
+              var dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+              dirLight.position.set(200, 400, 200);
+              scene.add(dirLight);
+
+              scene.add(new THREE.GridHelper(600, 40, 0x2741E7, 0x111118));
+
+              var controls = new THREE.OrbitControls(camera, renderer.domElement);
+              controls.enableDamping = true;
+              controls.dampingFactor = 0.05;
+              controls.rotateSpeed = 0.4;
+              controls.zoomSpeed = 0.5;
+              controls.panSpeed = 0.4;
+              controls.minDistance = 50;
+              controls.maxDistance = 2000;
+              controls.target.set(0, 50, 0);
+              controls.update();
+
+              var fbxB64 = "%%FBX_B64%%";
+              var raw = atob(fbxB64);
+              var bytes = new Uint8Array(raw.length);
+              for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+              var blob = new Blob([bytes.buffer]);
+              var blobUrl = URL.createObjectURL(blob);
+
+              var loader = new THREE.FBXLoader();
+              loader.load(blobUrl, function(object) {
+                object.traverse(function(child) {
+                  if (child instanceof THREE.Mesh) {
+                    if (child.geometry) child.geometry.computeVertexNormals();
+                    var geo = child.geometry;
+                    var hasVC = geo && geo.attributes && geo.attributes.color;
+                    var mats = Array.isArray(child.material) ? child.material : [child.material];
+                    var newMats = mats.map(function(m) {
+                      var opts = { side: THREE.DoubleSide };
+                      if (m.map) {
+                        opts.map = m.map;
+                        opts.color = new THREE.Color(0xffffff);
+                      } else if (hasVC) {
+                        opts.vertexColors = THREE.VertexColors;
+                        opts.color = new THREE.Color(0xffffff);
+                      } else {
+                        opts.color = (m.color && (m.color.r + m.color.g + m.color.b) > 0.05)
+                          ? m.color : new THREE.Color(0xaaaaaa);
+                      }
+                      return new THREE.MeshBasicMaterial(opts);
+                    });
+                    child.material = newMats.length === 1 ? newMats[0] : newMats;
+                  }
+                });
+
+                var box = new THREE.Box3().setFromObject(object);
+                var size = box.getSize(new THREE.Vector3());
+                var maxDim = Math.max(size.x, size.y, size.z);
+                if (maxDim > 0) {
+                  var scale = 200 / maxDim;
+                  object.scale.multiplyScalar(scale);
+                }
+
+                box.setFromObject(object);
+                var center = box.getCenter(new THREE.Vector3());
+                size = box.getSize(new THREE.Vector3());
+                object.position.sub(center);
+                object.position.y += size.y / 2;
+
+                scene.add(object);
+
+                camera.position.set(250, 180, 250);
+                controls.target.set(0, size.y / 2, 0);
+                controls.update();
+
+                document.getElementById('loading').style.display = 'none';
+                URL.revokeObjectURL(blobUrl);
+              }, undefined, function(err) {
+                document.getElementById('loading').style.display = 'none';
+                var el = document.getElementById('error-msg');
+                el.style.display = 'block';
+                el.textContent = 'Failed to load model: ' + (err.message || err);
+              });
+
+              window.addEventListener('resize', function() {
+                var w2 = document.body.clientWidth;
+                var h2 = document.body.clientHeight || 580;
+                camera.aspect = w2 / h2;
+                camera.updateProjectionMatrix();
+                renderer.setSize(w2, h2);
+              });
+
+              function animate() {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+              }
+              animate();
+            } catch(e) {
+              document.getElementById('loading').style.display = 'none';
+              var el = document.getElementById('error-msg');
+              el.style.display = 'block';
+              el.textContent = 'Error: ' + e.message;
+            }
+          }
+        </script>
+        </body>
+        </html>
+        """
+
+        import streamlit.components.v1 as components
+        components.html(threejs_html.replace("%%FBX_B64%%", fbx_b64), height=640)
+    else:
+        st.info("No FBX models found in the models/ directory.")
+
+
 def render_recommendations():
     st.subheader("Recommendations & Risks")
 
@@ -697,22 +901,21 @@ def render_dictionary():
         st.write("2) Go to **Forecast** to see baseline next-quarter direction.")
         st.write("3) Use **Scenario Planner** to test decisions: *If X, then Y*.")
         st.write("4) Review **Recommendations & Risks** for actions + triggers.")
+        st.write("5) Use **3D Viewer** to review model renderings (if provided).")
         st.markdown("---")
-        st.markdown("### KPI at a glance")
+        st.markdown("### Core KPI")
         st.write("**Debt-to-Income (DTI)** = **Total Liabilities ÷ Revenue**")
         st.write("• Lower is better (less liability per $1 of revenue).")
-        st.write("• If DTI rises, liabilities are growing faster than revenue.")
+        st.write("• Improve by increasing revenue, reducing liabilities, or both.")
         st.markdown("</div>", unsafe_allow_html=True)
 
     with right:
         st.markdown("## Key terms & metrics")
 
-        with st.expander("Core KPI: Debt-to-Income (DTI)", expanded=True):
+        with st.expander("Debt-to-Income (DTI)", expanded=True):
             st.write("**Definition:** Total Liabilities ÷ Revenue (quarterly).")
-            st.write("**Interpretation:**")
-            st.write("• DTI = 1.5 means $1.50 of liabilities for every $1.00 of quarterly revenue.")
-            st.write("• Improving DTI requires increasing revenue, reducing liabilities, or both.")
-            st.write("**Used in:** Executive Summary, Overview trend chart, Scenario Planner.")
+            st.write("DTI = 1.5 means $1.50 of liabilities for every $1.00 of quarterly revenue.")
+            st.write("Lower is better.")
 
         with st.expander("Revenue (Revenue_USD)", expanded=False):
             st.write("Top-line quarterly revenue. Increasing revenue improves DTI (it’s the denominator).")
@@ -721,48 +924,42 @@ def render_dictionary():
             st.write("All liabilities on the balance sheet. Reducing liabilities improves DTI (it’s the numerator).")
 
         with st.expander("Operating Income (Operating_Income_USD)", expanded=False):
-            st.write("Operating profit. Not directly in DTI, but a key signal of operating health and ability to pay down liabilities.")
+            st.write("Operating profit. Useful signal for ability to pay down liabilities over time.")
 
         with st.expander("Operating Expenses (Total_Operating_Expenses_USD)", expanded=False):
-            st.write("Total operating costs. In Scenario Planner, OpEx is a **conceptual lever**: cutting OpEx can reduce pressure on liabilities.")
+            st.write("Total operating costs. In Scenario Planner, OpEx is a conceptual lever that slightly reduces liability pressure when decreased.")
 
         with st.expander("Forecasting model (Ridge regression)", expanded=False):
-            st.write("A simple, explainable model that captures trend + seasonality.")
-            st.write("**Why:** Small quarterly dataset + correlated financial variables.")
-            st.write("**Output:** Baseline next-quarter Revenue and Liabilities (used for baseline DTI).")
+            st.write("Simple, explainable model capturing trend + seasonality (quarter indicators).")
+            st.write("Used to estimate baseline next-quarter revenue and liabilities.")
 
         with st.expander("Backtest metrics (MAE, RMSE, MAPE)", expanded=False):
-            st.write("These describe forecasting error using walk-forward testing.")
-            st.write("• **MAE:** average absolute error (in dollars).")
-            st.write("• **RMSE:** like MAE but penalizes large misses more (in dollars).")
-            st.write("• **MAPE:** average percent error (easy to interpret). Lower is better.")
-            st.write("Use them as a **confidence indicator**, not a guarantee.")
+            st.write("Walk-forward error metrics (model is tested on past periods).")
+            st.write("• **MAE**: average absolute error (in dollars).")
+            st.write("• **RMSE**: penalizes large errors more (in dollars).")
+            st.write("• **MAPE**: average percent error (easiest to interpret).")
 
         st.markdown("## How to use Scenario Planner (If X, then Y)")
         st.markdown(
             """
-            **Scenario Planner inputs:**
-            - **Revenue growth (%)**: your revenue improvement assumption next quarter.
-            - **OpEx change (%)**: conceptual efficiency lever (cuts reduce liability pressure slightly).
-            - **Liabilities improvement (%)**: paydown/refinancing effect next quarter.
+            **Inputs:**
+            - **Revenue growth (%)**: your assumption about next-quarter revenue improvement.
+            - **OpEx change (%)**: conceptual efficiency lever.
+            - **Liabilities improvement (%)**: paydown/refi effect.
 
-            **Scenario Planner outputs:**
-            - **Scenario DTI**: projected next-quarter DTI given your assumptions.
-            - **Change vs baseline**: improvement or worsening compared with baseline.
-            - **Baseline vs Scenario visuals**: gauge + bar chart.
-
-            **Practical executive use:**
-            - Try a few combinations until Scenario DTI is below the threshold.
-            - Use the recommended actions to decide which levers are most realistic.
+            **Outputs:**
+            - **Scenario DTI** and **Change vs baseline**
+            - Dollar impacts for revenue and liabilities
+            - Status vs threshold + recommended actions
             """
         )
 
-        st.markdown("## Limitations (important)")
+        st.markdown("## Limitations")
         st.markdown(
             """
-            - The dataset is simulated SEC-style data; real results may vary.
-            - Forecast assumes stable patterns; major financing/market changes can break patterns.
-            - Scenario Planner uses transparent business rules and should be treated as decision support.
+            - Dataset is simulated SEC-style.
+            - Forecast assumes stable relationships; major structural changes reduce accuracy.
+            - Scenario planner is decision support, not a guarantee.
             """
         )
 
@@ -776,6 +973,8 @@ elif page == "Forecast":
     render_forecast()
 elif page == "Scenario Planner":
     render_scenario_planner()
+elif page == "3D Viewer":
+    render_3d_viewer()
 elif page == "Recommendations & Risks":
     render_recommendations()
 else:
